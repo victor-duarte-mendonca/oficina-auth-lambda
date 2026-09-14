@@ -1,0 +1,33 @@
+name: CI
+
+# E0 (spec 08): jobs com os nomes dos status checks obrigatórios. Conteúdo real
+# (mvn verify + Testcontainers, terraform fmt/validate do gateway) entra em E5/E6.
+on:
+  push:
+    branches: [main, homolog]
+  pull_request:
+    branches: [main, homolog]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder até E5
+        run: test -f README.md && echo "sem código ainda — build-test entra em E5 (spec 02)"
+
+  terraform-check:
+    name: terraform-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+      - name: fmt (sem arquivos .tf ainda — passa vazio até E6)
+        run: terraform fmt -check -recursive -diff
