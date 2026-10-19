@@ -1,7 +1,8 @@
 name: CI
 
-# E0 (spec 08): jobs com os nomes dos status checks obrigatórios. Conteúdo real
-# (mvn verify + Testcontainers, terraform fmt/validate do gateway) entra em E5/E6.
+# E5 (spec 02 §9): build-test roda mvn verify (unidade + Testcontainers PostgreSQL + gate JaCoCo).
+# terraform-check cobre os .tf do repositório (entram nas etapas E5/E6). package/deploy entram com o
+# Terraform da função.
 on:
   push:
     branches: [main, homolog]
@@ -12,14 +13,39 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     name: build-test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Placeholder até E5
-        run: test -f README.md && echo "sem código ainda — build-test entra em E5 (spec 02)"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # O runner do GitHub já tem Docker: o Testcontainers sobe o PostgreSQL 16 de verdade.
+      - name: mvn verify
+        run: mvn -B verify
+      - name: Relatórios de teste e cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: |
+            **/target/surefire-reports
+            **/target/site/jacoco
+          if-no-files-found: ignore
+      - name: Artefato (ZIP do Lambda)
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-function
+          path: auth-function/target/auth-function.jar
+          if-no-files-found: error
 
   terraform-check:
     name: terraform-check
@@ -29,5 +55,5 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.10.5"
-      - name: fmt (sem arquivos .tf ainda — passa vazio até E6)
+      - name: fmt (sem arquivos .tf ainda — passa vazio até o Terraform da função)
         run: terraform fmt -check -recursive -diff
