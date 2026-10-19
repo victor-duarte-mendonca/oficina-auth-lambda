@@ -100,65 +100,15 @@ docker build --target artifact --output type=local,dest=./dist .   # ./dist/auth
 
 O `Dockerfile` existe **só** para o build reprodutível; o runtime é o ZIP.
 
-## Terraform (`terraform/`)
-
-Dono da stack serverless da função (o API Gateway e o authorizer entram na E6):
-
-| Recurso | Detalhe |
-|---|---|
-| `aws_lambda_function` | `java21`, `arm64`, 512 MB, timeout 10 s, `publish = true` + **SnapStart** em versões publicadas, concorrência reservada 10, dentro da VPC (subnets privadas) |
-| `aws_lambda_alias` `live` | aponta para a versão publicada; é o alias que o gateway invoca |
-| `aws_security_group` | **sem saída para a internet**: só TCP 5432 para o SG do RDS (sem NAT Gateway) |
-| regra de entrada no SG do RDS | criada **aqui** (o SG do Lambda só existe depois do RDS), lendo `rds_security_group_id` do SSM |
-| `aws_cloudwatch_log_group` | retenção de 7 dias (sem isto o padrão é "para sempre") |
-| IAM | usa a `LabRole` existente (a conta Academy bloqueia `iam:CreateRole`) |
-
-Rede e banco vêm do **SSM** publicado por `oficina-infra-k8s` e `oficina-infra-database`; nada é copiado à
-mão. Workspaces `hml` e `prod` (o `default` é inválido de propósito), state em
-`s3://oficina-tfstate-<account-id>/oficina/auth-lambda/<workspace>/terraform.tfstate`.
-
-### Pré-requisitos do deploy
-
-- `oficina-infra-k8s` **e** `oficina-infra-database` aplicados no mesmo workspace (senão o `plan` falha com
-  `ParameterNotFound`).
-- Secrets de **environment** (`homologacao` e `producao`; valores são seus, nada é commitado):
-
-  | Secret | Valor |
-  |---|---|
-  | `LAMBDA_RO_PASSWORD` | senha do papel `oficina_auth_ro` — a mesma que a aplicação usa na migration V6 |
-  | `JWT_PRIVATE_KEY_PEM` | a chave privada RSA (PKCS#8) **da aplicação**: a função precisa assinar com a mesma chave |
-
-  ```bash
-  gh secret set LAMBDA_RO_PASSWORD --repo victor-duarte-mendonca/oficina-auth-lambda --env homologacao
-  gh secret set JWT_PRIVATE_KEY_PEM --repo victor-duarte-mendonca/oficina-auth-lambda --env homologacao < keys/privateKey.pem
-  ```
-- Secrets `AWS_*` (org) com a sessão Academy ativa.
-
 ## Pipeline
 
-| Workflow / job | Gatilho | O que faz |
-|---|---|---|
-| `ci.yml` · `build-test` | todo push e PR | `mvn verify` (unidade + Testcontainers PostgreSQL + JaCoCo) |
-| `ci.yml` · `terraform-check` | todo push e PR | `fmt`, `validate`, `tflint`, `trivy config`, `shellcheck` |
-| `deploy.yml` · `package` | push e PR | JAR com dependências + checksum, como artefato |
-| `deploy.yml` · `plan` | PR | `terraform plan` no workspace do alvo (`homolog`→`hml`, `main`→`prod`) comentado no PR; senhas **placeholder** (ver nota) |
-| `deploy.yml` · `apply` | push em `homolog` / `main` | `apply` (publica a versão e move o alias) e **smoke test** |
-| `deploy.yml` · `destroy` | `workflow_dispatch` | exige digitar `destroy-<workspace>` |
+| Job | O que faz |
+|---|---|
+| `build-test` | `mvn verify` (unidade + Testcontainers PostgreSQL + JaCoCo) e publica o JAR como artefato |
+| `terraform-check` | `fmt` dos `.tf` do repositório |
 
-Nota sobre o `plan`: os segredos reais são de *environment*; usá-los pediria a aprovação de `producao` a cada
-PR para `main`. O `plan` usa valores placeholder e mostra as variáveis de ambiente do Lambda como alteradas
-(ruído esperado).
-
-### Smoke test (`scripts/smoke-test.sh`)
-
-Invoca o **alias** (onde o SnapStart vale), como o gateway fará: CPF inválido → 400; CPF válido
-inexistente → 401, o que exercita VPC + RDS + TLS + o papel somente-leitura (500 reprova); nenhum CPF
-completo no log do CloudWatch. Imprime o `REPORT` com o `Restore Duration` (prova de SnapStart).
-
-## Destroy
-
-Actions → `Deploy` → *Run workflow* → **Use workflow from: `homolog`** → workspace e `destroy-<workspace>`.
-Ordem de encerramento: **este repositório** → `oficina-infra-database` → `oficina-infra-k8s`.
+Terraform (função, SG, alias SnapStart, log group) e o deploy entram no próximo PR da E5; o API Gateway e o
+authorizer, na E6.
 
 ## Custo
 

@@ -1,8 +1,8 @@
 name: CI
 
 # E5 (spec 02 §9): build-test roda mvn verify (unidade + Testcontainers PostgreSQL + gate JaCoCo).
-# terraform-check cobre o Terraform da função: fmt, validate, tflint e Trivy (IaC scan).
-# O deploy (package/plan/apply/destroy) está em deploy.yml.
+# terraform-check cobre os .tf do repositório (entram nas etapas E5/E6). package/deploy entram com o
+# Terraform da função.
 on:
   push:
     branches: [main, homolog]
@@ -40,34 +40,20 @@ jobs:
             **/target/surefire-reports
             **/target/site/jacoco
           if-no-files-found: ignore
+      - name: Artefato (ZIP do Lambda)
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-function
+          path: auth-function/target/auth-function.jar
+          if-no-files-found: error
 
   terraform-check:
     name: terraform-check
     runs-on: ubuntu-latest
-    env:
-      # validate roda sem backend; TF_WORKSPACE satisfaz o guard de locals.tf.
-      TF_WORKSPACE: hml
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.10.5"
-      - run: terraform fmt -check -recursive -diff
-      - name: init + validate
-        working-directory: terraform
-        run: |
-          terraform init -backend=false -input=false
-          terraform validate
-      - uses: terraform-linters/setup-tflint@v4
-      - name: tflint
-        working-directory: terraform
-        run: tflint --format compact
-      - name: trivy config (IaC scan)
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: config
-          scan-ref: terraform
-          severity: HIGH,CRITICAL
-          exit-code: "1"
-      - name: shellcheck dos scripts
-        run: shellcheck scripts/*.sh
+      - name: fmt (sem arquivos .tf ainda — passa vazio até o Terraform da função)
+        run: terraform fmt -check -recursive -diff
