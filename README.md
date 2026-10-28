@@ -47,6 +47,43 @@ Hexagonal enxuta: `domain` (CPF, cliente), `application` (caso de uso e portas) 
 (handler, JDBC, JWT, config). **Sem framework** — Quarkus/Spring numa função destas é peso morto de cold
 start e de superfície de CVE.
 
+## Authorizer do gateway (`authorizer-function`, E6)
+
+Segunda função do repositório: o **Lambda authorizer** do API Gateway (`REQUEST`, *simple response*,
+`identitySource = $request.header.Authorization`, cache de 300 s). Valida o JWT **antes** de a requisição
+chegar ao cluster: token ausente, malformado, expirado ou forjado **nunca alcança a EC2**.
+
+| | `auth-function` | `authorizer-function` |
+|---|---|---|
+| Papel | emite o token a partir do CPF | confere o token em cada requisição não cacheada |
+| Rede | **dentro** da VPC (alcança o RDS) | **fora** da VPC: sem ENI, sem cold start de VPC no caminho |
+| Segredos | senha do banco, chave **privada** | **nenhum**: só a chave **pública** |
+| Banco | `oficina_auth_ro` (somente leitura) | **não tem driver JDBC nem credencial** |
+
+Por que fora da VPC e sem banco: se o authorizer falhar, **todas** as rotas protegidas param. O conjunto
+de coisas que podem quebrá-lo precisa ser mínimo, e dois níveis de privilégio pedem dois perfis de rede.
+
+**O que verifica** (nesta ordem; qualquer falha recusa): cabeçalho `Authorization: Bearer <jwt>` →
+algoritmo **fixado em RS256** → assinatura com a chave pública → `iss` → `exp` (com tolerância de relógio de
+30 s; sem `exp` o token é recusado) → `nbf` → `sub` → **algum papel conhecido** em `groups`
+(`ADMIN`, `MECHANIC` ou `CLIENT`). Quem decide *o que* cada papel pode fazer é a aplicação
+(`@RolesAllowed`); nenhuma das duas camadas confia na outra.
+
+**Ataques cobertos por teste:** `alg: none`, **confusão de algoritmo** (HS256 usando a chave pública como
+segredo), troca de algoritmo (RS384/RS512/PS256 com a chave certa), `jwk` embutido no header, `crit`
+desconhecido, payload adulterado, assinatura truncada, expirado, `nbf` futuro, emissor errado, sem
+`sub`/`exp`, e lixo.
+
+**Falha fechada:** nunca lança; qualquer erro inesperado vira `{"isAuthorized": false}`. A recusa não leva
+detalhe ao chamador; o motivo (`bad_signature`, `expired`, …) existe só no log. O token **nunca** vai para o
+log.
+
+| Variável | Obrigatória | Origem |
+|---|---|---|
+| `JWT_PUBLIC_KEY_PEM` | sim | derivada da chave privada pelo Terraform (`tls_public_key`); não é segredo |
+| `JWT_ISSUER` | não (`oficina-api`) | |
+| `CLOCK_SKEW_SECONDS` | não (30) | |
+
 ## Decisões de segurança
 
 - Papel do banco **somente-leitura em 5 colunas** (`oficina_auth_ro`): sem `INSERT`/`UPDATE`/`DELETE` e

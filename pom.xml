@@ -15,6 +15,7 @@
          authorizer, fora), então cada uma tem o seu artefato. O authorizer entra na E6. -->
     <modules>
         <module>auth-function</module>
+        <module>authorizer-function</module>
     </modules>
 
     <properties>
