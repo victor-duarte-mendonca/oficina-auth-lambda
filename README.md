@@ -278,3 +278,11 @@ Conferência manual que o runner não consegue (a porta 80 só aceita o seu `/32
 Lambda + SnapStart: **US$ 0** para Java; HTTP API: US$ 1,00 por milhão de requisições, **sem custo por hora**. Tudo
 dentro do nível gratuito para o volume do laboratório. A função de autenticação roda em VPC sem NAT Gateway (que
 custaria ≈ US$ 32/mês), só fala com o RDS.
+
+## Documentação
+
+Documentação de decisão e de arquitetura vive em [`oficina-app`](https://github.com/victor-duarte-mendonca/oficina-app) (atravessa os quatro repositórios):
+
+- [Arquitetura e diagramas (componentes, sequência)](https://github.com/victor-duarte-mendonca/oficina-app/blob/main/docs/arquitetura.md)
+- [ADRs — decisões de arquitetura](https://github.com/victor-duarte-mendonca/oficina-app/blob/main/docs/adr/README.md) · [RFCs](https://github.com/victor-duarte-mendonca/oficina-app/blob/main/docs/rfc/)
+- [Runbook de sessão e custos](https://github.com/victor-duarte-mendonca/oficina-app/blob/main/docs/RUNBOOK.md) · [Roteiro de validação em produção](https://github.com/victor-duarte-mendonca/oficina-app/blob/main/docs/VALIDACAO-PROD.md)
