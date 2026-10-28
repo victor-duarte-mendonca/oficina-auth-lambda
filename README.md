@@ -219,6 +219,24 @@ Rede, banco e EIP vêm do **SSM** publicado por `oficina-infra-k8s` e `oficina-i
   ```
 - Secrets `AWS_*` (org) com a sessão Academy ativa.
 
+## Logs no New Relic (`log-forwarder/`, E7)
+
+Os Lambdas rodam em VPC sem NAT e não têm internet: a saída dos logs é o CloudWatch. Um Lambda **forwarder**
+(Node 20, fora da VPC, `terraform/forwarder.tf`) recebe por assinatura os três grupos — access log do gateway e
+logs JSON de `auth-function` e `authorizer-function` — e envia à Log API do New Relic. Linhas JSON viram
+atributos pesquisáveis (`correlationId`, `event`, ...). Não usa o `newrelic-log-ingestion` do SAR porque o
+CloudFormation dele cria IAM role (bloqueado no Academy).
+
+- **Liga sozinho**: só é criado se o `oficina-infra-k8s` publicou a licença em
+  `/oficina/<env>/newrelic_license_key`. Sem ela, nada muda. O forwarder lê a licença do SSM na partida a frio;
+  ela não fica em variável de ambiente.
+- **Correlação**: o gateway repassa `X-Correlation-Id = $context.requestId` à aplicação (sobrescrito, o cliente
+  não forja). O mesmo id está no access log do gateway (`requestId`), nos logs da aplicação (`correlationId`) e
+  nos da função de auth (`gatewayRequestId`).
+- Testes: `node --test log-forwarder/` (no CI, job `build-test`).
+- Limite honesto: o API Gateway HTTP não propaga contexto W3C, então o trace OTLP **começa na aplicação**; o
+  gateway entra pela correlação de logs, não como span (ver PROGRESSO).
+
 ## Pipeline
 
 | Workflow / job | Gatilho | O que faz |
