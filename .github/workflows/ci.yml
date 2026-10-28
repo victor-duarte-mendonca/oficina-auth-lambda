@@ -31,6 +31,12 @@ jobs:
       # O runner do GitHub já tem Docker: o Testcontainers sobe o PostgreSQL 16 de verdade.
       - name: mvn verify
         run: mvn -B verify
+      # Forwarder de logs para o New Relic (E7): Node 20, sem dependências além do SDK da própria runtime.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: testes do log-forwarder
+        run: node --test log-forwarder/
       - name: Relatórios de teste e cobertura
         if: always()
         uses: actions/upload-artifact@v4

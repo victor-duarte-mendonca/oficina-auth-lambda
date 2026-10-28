@@ -52,7 +52,10 @@ resource "aws_apigatewayv2_integration" "app" {
   # O gateway injeta X-Gateway-Key; a aplicação rejeita com 403 qualquer requisição autenticada a /admin ou
   # /me sem o valor correto. Protege contra quem descubra o EIP e esteja numa faixa da AWS. O header do
   # cliente é sobrescrito: ele não pode forjar nem omitir a chave.
+  # X-Correlation-Id = requestId do gateway (E7): é o id que liga o access log do gateway aos logs e traces da
+  # aplicação. Sobrescrito: o cliente não forja o id. O requestId termina em "=" (a aplicação aceita).
   request_parameters = {
-    "overwrite:header.X-Gateway-Key" = var.gateway_key
+    "overwrite:header.X-Gateway-Key"    = var.gateway_key
+    "overwrite:header.X-Correlation-Id" = "$context.requestId"
   }
 }
