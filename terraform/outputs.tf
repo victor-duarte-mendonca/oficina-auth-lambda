@@ -27,3 +27,23 @@ output "log_group_name" {
   description = "Log group (retenção definida)"
   value       = aws_cloudwatch_log_group.auth.name
 }
+
+output "api_endpoint" {
+  description = "URL base do API Gateway (também publicada em SSM /oficina/<env>/api_gateway_url)"
+  value       = aws_apigatewayv2_api.main.api_endpoint
+}
+
+output "api_id" {
+  description = "Id da API (HTTP)"
+  value       = aws_apigatewayv2_api.main.id
+}
+
+output "gateway_log_group_name" {
+  description = "Log group do access log do gateway"
+  value       = aws_cloudwatch_log_group.gateway.name
+}
+
+output "authorizer_function_name" {
+  description = "Nome da função do authorizer"
+  value       = aws_lambda_function.authorizer.function_name
+}
