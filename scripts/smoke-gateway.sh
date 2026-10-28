@@ -75,7 +75,9 @@ assert_not_forwarded() {
     [ -n "$message" ] && [ "$message" != "None" ] && break
     sleep 5
   done
-  [ -n "$message" ] && [ "$message" != "None" ] || fail "$description: requisição ${request_id} não apareceu no access log"
+  if [ -z "$message" ] || [ "$message" = "None" ]; then
+    fail "$description: requisição ${request_id} não apareceu no access log"
+  fi
   local latency
   latency="$(echo "$message" | jq -r '.integrationLatency // "-"')"
   case "$latency" in
