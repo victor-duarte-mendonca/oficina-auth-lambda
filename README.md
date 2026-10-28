@@ -123,7 +123,7 @@ JDK 21+ e Maven 3.9+. Docker, para os testes de integração (Testcontainers) e 
 ## Execução local
 
 ```bash
-mvn verify                      # 100+ testes: unidade, contrato HTTP e PostgreSQL real; gate JaCoCo >= 80%
+mvn verify                      # 180+ testes nos dois módulos (unidade, contrato HTTP, PostgreSQL real); gate JaCoCo >= 80%
 ```
 
 O `Testcontainers` sobe `postgres:16-alpine`. Com Docker 29+, o Testcontainers 1.x pode precisar de
@@ -132,22 +132,131 @@ O `Testcontainers` sobe `postgres:16-alpine`. Com Docker 29+, o Testcontainers 1
 ## Build do artefato
 
 ```bash
-docker build --target artifact --output type=local,dest=./dist .   # ./dist/auth-function.jar
+docker build --target artifact --output type=local,dest=./dist .   # ./dist/auth-function.jar e authorizer-function.jar
 ```
 
 O `Dockerfile` existe **só** para o build reprodutível; o runtime é o ZIP.
 
+## API Gateway (`terraform/`, E6)
+
+HTTP API (v2), **sem custo por hora** (US$ 1,00 por milhão de requisições). Uma API por ambiente
+(`oficina-hml`, `oficina-prod`), stage `$default` com auto-deploy. A URL é publicada em SSM
+(`/oficina/<env>/api_gateway_url`).
+
+| Método | Rota | Integração | Autorização |
+|---|---|---|---|
+| `POST` | `/auth/token` | `AWS_PROXY` → alias `live` da função de autenticação | nenhuma (é quem emite o token) |
+| `POST` | `/auth/login` | `HTTP_PROXY` → `http://<eip>/auth/login` | nenhuma (login de funcionário, já protegido por senha) |
+| `ANY` | `/admin/{proxy+}` | `HTTP_PROXY` → `http://<eip>/admin/{proxy}` | **authorizer** |
+| `ANY` | `/me/{proxy+}` | `HTTP_PROXY` → `http://<eip>/me/{proxy}` | **authorizer** |
+| `GET` | `/me` | `HTTP_PROXY` → `http://<eip>/me` | **authorizer** — *sétima rota, ver nota* |
+| `GET` | `/health` | `HTTP_PROXY` → `http://<eip>/q/health/ready` | nenhuma (monitor de uptime) |
+| `GET` | `/public/{proxy+}` | `HTTP_PROXY` → `http://<eip>/public/{proxy}` | nenhuma (acompanhamento por token de uso único) |
+
+> **Sétima rota (além das seis da spec 03):** `/me/{proxy+}` exige ao menos um segmento depois de `/me`, então
+> **não casa com `GET /me`** — justamente o perfil do cliente. Sem a rota extra, o cliente autenticado receberia
+> 404 do gateway.
+
+Não expostas, de propósito: `/q/metrics`, `/q/health/live`, `/swagger-ui`, `/openapi` (superfície interna).
+
+**Duas camadas de proteção** (nenhuma confia na outra): o **authorizer** decide *se passa* (assinatura, emissor,
+validade, papel conhecido) e a **aplicação** decide *o que pode fazer* (`@RolesAllowed`, posse do recurso). Token
+ausente → **401 do gateway**; token **recusado** pelo authorizer → **403 do gateway** (num HTTP API com Lambda
+authorizer de resposta simples, `isAuthorized=false` vira 403, e não 401 como a spec 03 §9 supõe). Nos dois casos
+a requisição **não chega ao cluster**: o access log mostra `integrationLatency` vazio.
+
+**Segredo no header:** o gateway **sobrescreve** `X-Gateway-Key` em toda integração com a aplicação (o cliente não
+pode forjar nem omitir); a aplicação devolve 403 a quem já autenticou mas não veio pelo gateway. O valor é o
+mesmo `APP_GATEWAY_KEY` nos dois repositórios.
+
+**Controles operacionais:** throttling padrão de 50 rps / rajada 100, e **10 rps / rajada 20 em `POST /auth/token`**
+(a defesa primária contra enumeração de CPF); CORS (`cors_allow_origins`, padrão `http://localhost:3000`); access log
+em JSON no CloudWatch (7 dias) com `requestId`, `integrationLatency`, `authorizerError`, **sem** o header
+`Authorization` nem o corpo.
+
+**Limitações assumidas:** (1) sem TLS entre o gateway e o cluster — sem domínio não há certificado válido, e um
+autoassinado exigiria `insecureSkipVerify`, que é pior por aparentar proteção (caminho de produção: domínio + ACM no
+gateway e cert-manager no Traefik); (2) o cache de 300 s do authorizer pode manter um token aceito por até 300 s
+depois do `exp` (a aplicação revalida o JWT por conta própria).
+
+## Terraform (`terraform/`)
+
+Dono da stack serverless completa:
+
+| Recurso | Detalhe |
+|---|---|
+| `aws_lambda_function` (autenticação) | `java21`, `arm64`, 512 MB, 10 s, **SnapStart** em versão publicada, concorrência reservada 10, **dentro da VPC** |
+| `aws_lambda_function` (authorizer) | `java21`, `arm64`, 512 MB, 5 s, **SnapStart**, **sem `vpc_config`** e sem nenhuma variável de rede ou de banco |
+| `aws_lambda_alias` `live` (×2) | apontam para as versões publicadas; o gateway invoca sempre o alias |
+| `aws_security_group` | da função de autenticação: **sem saída para a internet**, só TCP 5432 para o SG do RDS |
+| regra de entrada no SG do RDS | criada **aqui** (o SG do Lambda só existe depois do RDS), lendo `rds_security_group_id` do SSM |
+| `aws_apigatewayv2_*` | API, stage com access log e throttling, 2 tipos de integração, 7 rotas, authorizer |
+| `tls_public_key` | **deriva a chave pública** da privada que já existe: só a pública chega ao authorizer |
+| `aws_cloudwatch_log_group` (×3) | funções e gateway, retenção de 7 dias (sem isso o padrão é "para sempre") |
+| IAM | usa a `LabRole` existente (a conta Academy bloqueia `iam:CreateRole`) |
+
+Rede, banco e EIP vêm do **SSM** publicado por `oficina-infra-k8s` e `oficina-infra-database`; nada é copiado
+à mão. Workspaces `hml` e `prod` (o `default` é inválido de propósito), state em
+`s3://oficina-tfstate-<account-id>/oficina/auth-lambda/<workspace>/terraform.tfstate`.
+
+### Pré-requisitos do deploy
+
+- `oficina-infra-k8s` **e** `oficina-infra-database` aplicados no mesmo workspace e a **aplicação implantada** (o
+  gateway roteia para ela; o papel `oficina_auth_ro` só existe depois de ela migrar o banco).
+- Secrets de **environment** (`homologacao` e `producao`; valores são seus, nada é commitado):
+
+  | Secret | Valor |
+  |---|---|
+  | `LAMBDA_RO_PASSWORD` | senha do papel `oficina_auth_ro` — a mesma que a aplicação usa na migration V6 |
+  | `JWT_PRIVATE_KEY_PEM` | a chave privada RSA (PKCS#8) **da aplicação** |
+  | `APP_GATEWAY_KEY` | o **mesmo** valor da aplicação (≥ 16 caracteres) |
+  | `APP_SEED_ADMIN_PASSWORD` | opcional: habilita o fluxo autenticado do smoke test (em `hml`) |
+
+  ```bash
+  gh secret set LAMBDA_RO_PASSWORD --repo victor-duarte-mendonca/oficina-auth-lambda --env homologacao
+  gh secret set JWT_PRIVATE_KEY_PEM --repo victor-duarte-mendonca/oficina-auth-lambda --env homologacao < keys/privateKey.pem
+  gh secret set APP_GATEWAY_KEY --repo victor-duarte-mendonca/oficina-auth-lambda --env homologacao
+  ```
+- Secrets `AWS_*` (org) com a sessão Academy ativa.
+
 ## Pipeline
 
-| Job | O que faz |
-|---|---|
-| `build-test` | `mvn verify` (unidade + Testcontainers PostgreSQL + JaCoCo) e publica o JAR como artefato |
-| `terraform-check` | `fmt` dos `.tf` do repositório |
+| Workflow / job | Gatilho | O que faz |
+|---|---|---|
+| `ci.yml` · `build-test` | todo push e PR | `mvn verify` nos dois módulos (unidade + Testcontainers PostgreSQL + JaCoCo) |
+| `ci.yml` · `terraform-check` | todo push e PR | `fmt`, `validate`, `tflint`, `trivy config`, `shellcheck` |
+| `ci.yml` · `workflow-lint` | todo push e PR | `actionlint` (não obrigatório) |
+| `deploy.yml` · `package` | push e PR | os dois JARs + checksums, como artefato |
+| `deploy.yml` · `stack` | push / disparo manual | a infraestrutura existe? Se não (ou a sessão AWS expirou), o `apply` é **ignorado com um aviso** |
+| `deploy.yml` · `plan` | PR | `terraform plan` no workspace do alvo (`homolog`→`hml`, `main`→`prod`) comentado no PR; segredos **placeholder** |
+| `deploy.yml` · `apply` | push em `homolog` / `main` ou disparo manual | `apply` (publica as versões e move os aliases) e **dois smoke tests** |
+| `deploy.yml` · `destroy` | disparo manual | exige `destroy-<workspace>` |
 
-Terraform (função, SG, alias SnapStart, log group) e o deploy entram no próximo PR da E5; o API Gateway e o
-authorizer, na E6.
+`hml` sobe **sob demanda**: um merge sem infraestrutura não fica vermelho. Depois de subir a infra e de
+implantar a aplicação: *Actions → Deploy → Run workflow → Use workflow from: `homolog`* (deixe `confirm` vazio).
+
+### Smoke tests
+
+- **`scripts/smoke-test.sh`** (função): invoca o **alias** — CPF inválido → 400; CPF válido inexistente → 401 (prova
+  VPC + RDS + TLS + papel somente-leitura; 500 reprova); sem CPF completo no log; imprime o `REPORT` com
+  `Restore Duration` (prova de SnapStart).
+- **`scripts/smoke-gateway.sh`** (ponta a ponta pelo gateway): `/health`; `POST /auth/token` (400, 401); `/me` sem
+  `Authorization` e com token **forjado** negados **no gateway** (confirmado no access log: sem latência de
+  integração); rajada em `/auth/token` → **429**; e, com `APP_SEED_ADMIN_PASSWORD`, o **fluxo completo do cliente**:
+  login do admin → `/admin` pelo authorizer + `X-Gateway-Key` → cria um cliente → `POST /auth/token` → `GET /me` e
+  `/me/work-orders` → papel errado em `/admin` negado pela aplicação (e o cliente de teste é removido).
+
+Conferência manual que o runner não consegue (a porta 80 só aceita o seu `/32` e o gateway): de **sua máquina**,
+`curl http://<eip>/me/work-orders` com token válido e **sem** `X-Gateway-Key` deve devolver **403**.
+
+## Destroy
+
+*Actions → Deploy → Run workflow → **Use workflow from: `homolog`*** (ou `main` para prod) → `workspace` e
+`confirm` = `destroy-<workspace>`. Ordem de encerramento: **este repositório** → `oficina-infra-database` →
+`oficina-infra-k8s`.
 
 ## Custo
 
-Lambda + SnapStart: **US$ 0** para Java; dentro do nível gratuito para o volume do laboratório. A função
-roda em VPC sem NAT Gateway (que custaria ≈ US$ 32/mês), só fala com o RDS.
+Lambda + SnapStart: **US$ 0** para Java; HTTP API: US$ 1,00 por milhão de requisições, **sem custo por hora**. Tudo
+dentro do nível gratuito para o volume do laboratório. A função de autenticação roda em VPC sem NAT Gateway (que
+custaria ≈ US$ 32/mês), só fala com o RDS.
