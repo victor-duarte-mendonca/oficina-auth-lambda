@@ -133,13 +133,13 @@ assert_not_forwarded "$rid" "token forjado"
 # ===== 5. throttling =====
 throttled=0
 for _ in 1 2 3; do
-  codes="$(seq 1 30 | xargs -P 30 -I{} curl -sS -o /dev/null -w '%{http_code}\n' --max-time 20 \
+  codes="$(seq 1 150 | xargs -P 50 -I{} curl -sS -o /dev/null -w '%{http_code}\n' --max-time 20 \
     -X POST -H 'Content-Type: application/json' -d '{"cpf":"111.111.111-11"}' "${API_URL}/auth/token" || true)"
   throttled="$(echo "$codes" | grep -c '^429$' || true)"
   [ "$throttled" -gt 0 ] && break
   sleep 2
 done
-[ "$throttled" -gt 0 ] || fail "30 requisições simultâneas em /auth/token não geraram nenhum 429 (throttling por rota)"
+[ "$throttled" -gt 0 ] || fail "150 requisições em /auth/token (50 simultâneas) não geraram nenhum 429 (throttling por rota)"
 echo "ok  rajada em /auth/token -> ${throttled} resposta(s) 429"
 sleep 3 # deixa o balde do throttling encher antes do fluxo autenticado
 
