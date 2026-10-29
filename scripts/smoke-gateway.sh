@@ -69,9 +69,10 @@ random_valid_cpf() {
 assert_not_forwarded() {
   local request_id="$1" description="$2" message=""
   [ -n "$GATEWAY_LOG_GROUP" ] || { echo "aviso: GATEWAY_LOG_GROUP vazio — access log não verificado ($description)"; return 0; }
+  # A CLI pagina e devolve um valor por página ("None" nas vazias): fica com a primeira mensagem real.
   for _ in $(seq 1 12); do
     message="$(aws logs filter-log-events --log-group-name "$GATEWAY_LOG_GROUP" \
-      --filter-pattern "\"${request_id}\"" --query 'events[0].message' --output text 2>/dev/null || true)"
+      --filter-pattern "\"${request_id}\"" --query 'events[0].message' --output text 2>/dev/null       | awk '$0 != "None" {print; exit}' || true)"
     [ -n "$message" ] && [ "$message" != "None" ] && break
     sleep 5
   done
