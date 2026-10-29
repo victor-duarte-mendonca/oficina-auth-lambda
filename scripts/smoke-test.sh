@@ -67,9 +67,10 @@ else
 fi
 
 # Nenhum CPF completo no log: o filtro roda no log group depois de uma pequena espera de ingestão.
+# A CLI pagina e imprime um length(events) por página: soma os valores, senão duas páginas vazias (0 e 0) falham o teste.
 sleep 10
 leaked="$(aws logs filter-log-events --log-group-name "/aws/lambda/${FUNCTION}" \
-  --filter-pattern "\"${UNKNOWN_CPF_DIGITS}\"" --query 'length(events)' --output text)"
+  --filter-pattern "\"${UNKNOWN_CPF_DIGITS}\"" --query 'length(events)' --output text | awk '{n += $1} END {print n + 0}')"
 [ "$leaked" = "0" ] || fail "o CPF completo apareceu em $leaked evento(s) de log"
 echo "ok  nenhum CPF completo no log"
 
