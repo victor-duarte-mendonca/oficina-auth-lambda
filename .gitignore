@@ -16,3 +16,10 @@ patch.json
 # IDEs
 .idea/
 .vscode/
+
+# Java / Maven
+target/
+dist/
+*.iml
+.mvn/wrapper/maven-wrapper.jar
+terraform/.build/

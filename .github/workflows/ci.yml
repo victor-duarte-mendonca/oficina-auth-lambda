@@ -1,7 +1,8 @@
 name: CI
 
-# E0 (spec 08): jobs com os nomes dos status checks obrigatórios. Conteúdo real
-# (mvn verify + Testcontainers, terraform fmt/validate do gateway) entra em E5/E6.
+# E5/E6 (specs 02 e 03): build-test roda mvn verify nos dois módulos (unidade + Testcontainers PostgreSQL +
+# gate JaCoCo). terraform-check cobre o Terraform: fmt, validate, tflint e Trivy (IaC scan), e shellcheck
+# dos scripts. O deploy (package/plan/apply/destroy) está em deploy.yml.
 on:
   push:
     branches: [main, homolog]
@@ -12,22 +13,77 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     name: build-test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Placeholder até E5
-        run: test -f README.md && echo "sem código ainda — build-test entra em E5 (spec 02)"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # O runner do GitHub já tem Docker: o Testcontainers sobe o PostgreSQL 16 de verdade.
+      - name: mvn verify
+        run: mvn -B verify
+      # Forwarder de logs para o New Relic (E7): Node 20, sem dependências além do SDK da própria runtime.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: testes do log-forwarder
+        run: node --test log-forwarder/
+      - name: Relatórios de teste e cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: |
+            **/target/surefire-reports
+            **/target/site/jacoco
+          if-no-files-found: ignore
 
   terraform-check:
     name: terraform-check
     runs-on: ubuntu-latest
+    env:
+      # validate roda sem backend; TF_WORKSPACE satisfaz o guard de locals.tf.
+      TF_WORKSPACE: hml
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.10.5"
-      - name: fmt (sem arquivos .tf ainda — passa vazio até E6)
-        run: terraform fmt -check -recursive -diff
+      - run: terraform fmt -check -recursive -diff
+      - name: init + validate
+        working-directory: terraform
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+      - uses: terraform-linters/setup-tflint@v4
+      - name: tflint
+        working-directory: terraform
+        run: tflint --format compact
+      - name: trivy config (IaC scan)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: terraform
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: shellcheck dos scripts
+        run: shellcheck scripts/*.sh
+
+  # Lint dos workflows. Não é check obrigatório: um erro de sintaxe do deploy só apareceria no primeiro
+  # deploy, que depende de uma sessão AWS ativa.
+  workflow-lint:
+    name: workflow-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest
