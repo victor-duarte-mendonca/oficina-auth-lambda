@@ -69,9 +69,10 @@ random_valid_cpf() {
 assert_not_forwarded() {
   local request_id="$1" description="$2" message=""
   [ -n "$GATEWAY_LOG_GROUP" ] || { echo "aviso: GATEWAY_LOG_GROUP vazio — access log não verificado ($description)"; return 0; }
+  # A CLI pagina e devolve um valor por página ("None" nas vazias): fica com a primeira mensagem real.
   for _ in $(seq 1 12); do
     message="$(aws logs filter-log-events --log-group-name "$GATEWAY_LOG_GROUP" \
-      --filter-pattern "\"${request_id}\"" --query 'events[0].message' --output text 2>/dev/null || true)"
+      --filter-pattern "\"${request_id}\"" --query 'events[0].message' --output text 2>/dev/null       | awk '$0 != "None" {print; exit}' || true)"
     [ -n "$message" ] && [ "$message" != "None" ] && break
     sleep 5
   done
@@ -132,13 +133,13 @@ assert_not_forwarded "$rid" "token forjado"
 # ===== 5. throttling =====
 throttled=0
 for _ in 1 2 3; do
-  codes="$(seq 1 30 | xargs -P 30 -I{} curl -sS -o /dev/null -w '%{http_code}\n' --max-time 20 \
+  codes="$(seq 1 150 | xargs -P 50 -I{} curl -sS -o /dev/null -w '%{http_code}\n' --max-time 20 \
     -X POST -H 'Content-Type: application/json' -d '{"cpf":"111.111.111-11"}' "${API_URL}/auth/token" || true)"
   throttled="$(echo "$codes" | grep -c '^429$' || true)"
   [ "$throttled" -gt 0 ] && break
   sleep 2
 done
-[ "$throttled" -gt 0 ] || fail "30 requisições simultâneas em /auth/token não geraram nenhum 429 (throttling por rota)"
+[ "$throttled" -gt 0 ] || fail "150 requisições em /auth/token (50 simultâneas) não geraram nenhum 429 (throttling por rota)"
 echo "ok  rajada em /auth/token -> ${throttled} resposta(s) 429"
 sleep 3 # deixa o balde do throttling encher antes do fluxo autenticado
 
