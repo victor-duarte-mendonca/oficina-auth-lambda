@@ -133,7 +133,6 @@ jobs:
       # para main. Valores placeholder só satisfazem a validação das variáveis: o plan mostra as
       # variáveis de ambiente dos Lambdas e a chave do gateway como alteradas (ruído esperado, ignorar).
       TF_VAR_db_password: plan-only-placeholder-not-a-real-password
-      TF_VAR_jwt_private_key_pem: plan-only-placeholder
       TF_VAR_gateway_key: plan-only-placeholder-gateway-key
     steps:
       - uses: actions/checkout@v4
@@ -160,6 +159,10 @@ jobs:
         if: steps.creds.outputs.present == 'true'
         working-directory: terraform
         run: |
+          # O data tls_public_key interpreta a chave já no plan: um placeholder de texto não é PEM. Gera uma
+          # chave descartável só para o plan (a real é secret de environment e pediria aprovação em todo PR).
+          TF_VAR_jwt_private_key_pem="$(openssl genrsa 2048 2>/dev/null | openssl pkcs8 -topk8 -nocrypt)"
+          export TF_VAR_jwt_private_key_pem
           BUCKET="$(bash ../scripts/bootstrap-state-bucket.sh)"
           terraform init -input=false -backend-config="bucket=${BUCKET}"
           terraform workspace select -or-create "$WORKSPACE"
