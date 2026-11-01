@@ -279,6 +279,16 @@ Lambda + SnapStart: **US$ 0** para Java; HTTP API: US$ 1,00 por milhão de requi
 dentro do nível gratuito para o volume do laboratório. A função de autenticação roda em VPC sem NAT Gateway (que
 custaria ≈ US$ 32/mês), só fala com o RDS.
 
+## APIs (Swagger/Postman)
+
+A API pública (`POST /auth/token` e as rotas protegidas pelo authorizer) é exercitada pela coleção Postman da Fase 3 (pasta de autenticação por CPF):
+[`Oficina-Prod.postman_collection.json`](https://github.com/victor-duarte-mendonca/oficina-app/blob/main/postman/Oficina-Prod.postman_collection.json) · [`Oficina-Prod-Run.postman_collection.json`](https://github.com/victor-duarte-mendonca/oficina-app/blob/main/postman/Oficina-Prod-Run.postman_collection.json).
+Spec OpenAPI da aplicação: [`docs/api/openapi.yaml`](https://github.com/victor-duarte-mendonca/oficina-app/blob/main/docs/api/openapi.yaml).
+
+## URL do deploy ativo
+
+O ambiente roda em AWS Academy (efêmero) e a URL do API Gateway muda a cada sessão: ela é publicada no SSM (`/oficina/<env>/api_gateway_url`) e no resumo do workflow *Deploy*.
+
 ## Documentação
 
 Documentação de decisão e de arquitetura vive em [`oficina-app`](https://github.com/victor-duarte-mendonca/oficina-app) (atravessa os quatro repositórios):

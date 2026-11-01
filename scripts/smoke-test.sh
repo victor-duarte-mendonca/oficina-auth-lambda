@@ -35,6 +35,11 @@ fail() {
   exit 1
 }
 
+# Com SnapStart, logo após o apply a versão fica Pending (snapshot sendo criado) e a invocação
+# falha com ResourceConflictException; espera o alias ficar Active.
+echo "Aguardando ${FUNCTION}:${ALIAS} ficar Active"
+aws lambda wait function-active-v2 --function-name "$FUNCTION" --qualifier "$ALIAS"
+
 echo "Invocando ${FUNCTION}:${ALIAS}"
 
 status_invalid="$(invoke "$INVALID_CPF" invalid)"
