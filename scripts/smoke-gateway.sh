@@ -167,7 +167,14 @@ create_status="$(post_json /admin/clients \
 client_id="$(jq -r '.id' /tmp/smoke-client.json)"
 echo "ok  cliente de teste criado (id ${client_id})"
 
-client_token="$(post_json /auth/token "$(jq -cn --arg cpf "$cpf" '{cpf: $cpf}')" | jq -r '.access_token // empty')"
+# O balde do throttling de /auth/token pode seguir vazio logo após a rajada (o API Gateway não é exato):
+# repete em caso de 429 antes de dar o fluxo por quebrado.
+client_token=""
+for _ in $(seq 1 6); do
+  client_token="$(post_json /auth/token "$(jq -cn --arg cpf "$cpf" '{cpf: $cpf}')" | jq -r '.access_token // empty')"
+  [ -n "$client_token" ] && break
+  sleep 5
+done
 [ -n "$client_token" ] || fail "POST /auth/token com o CPF do cliente de teste não devolveu access_token"
 echo "ok  POST /auth/token com CPF do cliente -> access_token"
 
