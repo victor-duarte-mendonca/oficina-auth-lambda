@@ -272,7 +272,6 @@ jobs:
       AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
       # O destroy exige as variáveis obrigatórias, mas não as usa: placeholders evitam depender dos segredos.
       TF_VAR_db_password: destroy-only-placeholder-not-used
-      TF_VAR_jwt_private_key_pem: destroy-only-placeholder
       TF_VAR_gateway_key: destroy-only-placeholder-not-used
     concurrency:
       group: terraform-state-${{ inputs.workspace }}
@@ -294,6 +293,10 @@ jobs:
       - name: terraform destroy
         working-directory: terraform
         run: |
+          # O data tls_public_key interpreta a chave ao ler o state: um placeholder de texto não é PEM.
+          # Gera uma chave descartável (o destroy não usa o valor).
+          TF_VAR_jwt_private_key_pem="$(openssl genrsa 2048 2>/dev/null | openssl pkcs8 -topk8 -nocrypt)"
+          export TF_VAR_jwt_private_key_pem
           BUCKET="$(bash ../scripts/bootstrap-state-bucket.sh)"
           terraform init -input=false -backend-config="bucket=${BUCKET}"
           terraform workspace select "$WORKSPACE"
