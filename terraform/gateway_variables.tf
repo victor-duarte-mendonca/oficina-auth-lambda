@@ -56,3 +56,27 @@ variable "token_route_burst_limit" {
   type        = number
   default     = 20
 }
+
+variable "public_decision_rate_limit" {
+  description = "Requisições por segundo em POST /public/*: decisão do orçamento por link, sem authorizer"
+  type        = number
+  default     = 10
+}
+
+variable "public_decision_burst_limit" {
+  description = "Rajada em POST /public/*"
+  type        = number
+  default     = 20
+}
+
+variable "webhook_route_rate_limit" {
+  description = "Requisições por segundo em POST /webhooks/stripe (a autenticação é a assinatura da Stripe)"
+  type        = number
+  default     = 20
+}
+
+variable "webhook_route_burst_limit" {
+  description = "Rajada em POST /webhooks/stripe"
+  type        = number
+  default     = 40
+}

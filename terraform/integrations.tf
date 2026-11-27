@@ -35,6 +35,9 @@ locals {
     me_root = { method = "GET", upstream = "/me" }
     health  = { method = "GET", upstream = "/q/health/ready" }
     public  = { method = "GET", upstream = "/public/{proxy}" }
+    # Fase 4 (spec 12 §5): decisao do orcamento por link do e-mail e webhook da Stripe.
+    public_decision = { method = "POST", upstream = "/public/{proxy}" }
+    stripe_webhook  = { method = "POST", upstream = "/webhooks/stripe" }
   }
 }
 

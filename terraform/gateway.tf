@@ -45,6 +45,20 @@ resource "aws_apigatewayv2_stage" "default" {
     throttling_burst_limit = var.token_route_burst_limit
   }
 
+  # POST /public/*: decisao por link; limite proprio contra tentativa de adivinhar o codigo.
+  route_settings {
+    route_key              = aws_apigatewayv2_route.public_decision.route_key
+    throttling_rate_limit  = var.public_decision_rate_limit
+    throttling_burst_limit = var.public_decision_burst_limit
+  }
+
+  # POST /webhooks/stripe: baixo (a Stripe envia poucos eventos); a assinatura e a autenticacao.
+  route_settings {
+    route_key              = aws_apigatewayv2_route.stripe_webhook.route_key
+    throttling_rate_limit  = var.webhook_route_rate_limit
+    throttling_burst_limit = var.webhook_route_burst_limit
+  }
+
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.gateway.arn
     format = jsonencode({
