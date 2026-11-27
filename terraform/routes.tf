@@ -58,3 +58,20 @@ resource "aws_apigatewayv2_route" "me_root" {
   authorization_type = "CUSTOM"
   authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
 }
+
+# --- Fase 4 (spec 12 §5): sem authorizer JWT ---
+
+# Decisao do orcamento (aprovar/recusar) pelo link do e-mail: a autenticacao e o codigo de uso unico do corpo.
+resource "aws_apigatewayv2_route" "public_decision" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /public/{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.app["public_decision"].id}"
+}
+
+# Webhook da Stripe: a autenticacao e a assinatura (Stripe-Signature, validada pelo Billing). Passa pelo gateway para
+# herdar o X-Gateway-Key e o throttling; o corpo e limitado pelo proprio Billing (HTTP API nao limita tamanho).
+resource "aws_apigatewayv2_route" "stripe_webhook" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /webhooks/stripe"
+  target    = "integrations/${aws_apigatewayv2_integration.app["stripe_webhook"].id}"
+}
